@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Mapa de Paradas - Itajaí</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/esri-leaflet@3.0.12/dist/esri-leaflet.js"></script>
+    <script src="https://unpkg.com/esri-leaflet-vector@4.2.3/dist/esri-leaflet-vector.js"></script>
+
+    <style>
+        body { margin:0; padding:0; }
+        #mapa { width: 100%; height: 100vh; }
+        .legend {
+            background: white;
+            padding: 12px; 
+            line-height: 24px; 
+            color: #333;
+            border-radius: 5px;
+            box-shadow: 0 0 15px rgba(0,0,0,0.2);
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+        }
+        .legend i {
+            width: 16px; 
+            height: 16px;
+            float: left;
+            margin-right: 8px;
+            margin-top: 3px; 
+            opacity: 0.9;
+            border-radius: 50%;
+            border: 1px solid #000;
+        }
+        .legend strong {
+            font-size: 16px; 
+        }
+    </style>
+</head>
+<body>
+
+<div id="mapa"></div>
+
+<script>
+    const CONFIG_TIPOS = {"1_novo": {"cor": "#c0392b", "nome": "Abrigo Existente Novo"}, "1_velho": {"cor": "#2980b9", "nome": "Abrigo Existente Antigo"}, "2": {"cor": "#27ae60", "nome": "Placa Existente"}, "3": {"cor": "#f1c40f", "nome": "Marca\u00e7\u00e3o Poste"}, "5": {"cor": "#d35400", "nome": "Placa inutiliz\u00e1vel"}, "6": {"cor": "#8e44ad", "nome": "Abrigo inutiliz\u00e1vel"}, "7": {"cor": "#34495e", "nome": "Terminal"}};
+
+    const mapa = L.map('mapa').setView([-26.915, -48.670], 13);
+
+    // Mapa base da Prefeitura
+    let tilesmu = L.esri.Vector.vectorTileLayer("7a110ef9198540068341e6908c6bf298", {
+        portalUrl: "https://arcgis.itajai.sc.gov.br/portal",
+        attribution: 'Prefeitura de Itajaí'
+    }).addTo(mapa);
+
+    // Função para separar o Abrigo 1 em Novo ou Velho
+    function obterChaveTipo(feature) {
+        let tipoRaw = feature.properties.tipo;
+        let tipoStr = tipoRaw ? String(tipoRaw).split('.')[0] : "padrao";
+
+        // Se for Abrigo Existente (1), checa a observação
+        if (tipoStr === "1") {
+            let obs = feature.properties.observacao;
+            if (obs === "Novo") {
+                return "1_novo";
+            } else {
+                // Qualquer caso que seja "Velho" ou vazio, cai para o antigo
+                return "1_velho";
+            }
+        }
+        return tipoStr;
+    }
+
+    // Consumindo os dados diretamente do ArcGIS Server
+    const urlParadas = "https://arcgis.itajai.sc.gov.br/server/rest/services/Hosted/paradas_atualizacao_atuais_e_novas/FeatureServer/0";
+
+    const paradasLayer = L.esri.featureLayer({
+        url: urlParadas,
+
+        // Filtro para não carregar pontos "Não classificados"
+        filter: function (feature) {
+            let tipoStr = obterChaveTipo(feature);
+            return tipoStr !== "padrao" && CONFIG_TIPOS.hasOwnProperty(tipoStr);
+        },
+
+        pointToLayer: function (feature, latlng) {
+            let tipoStr = obterChaveTipo(feature);
+            let config = CONFIG_TIPOS[tipoStr];
+
+            return L.circleMarker(latlng, {
+                radius: 6,
+                fillColor: config.cor,
+                color: "#000",
+                weight: 1,
+                opacity: 1,
+                fillOpacity: 0.8
+            });
+        },
+
+        onEachFeature: function (feature, layer) {
+            let assentos = feature.properties.lugares_sentados ?? "Não informado";
+            let tipoStr = obterChaveTipo(feature);
+            let nomeTipo = CONFIG_TIPOS[tipoStr]?.nome;
+
+            layer.bindPopup(`
+                <div style="font-family: sans-serif;">
+                    <strong>Tipo:</strong> ${nomeTipo}<br>
+                    <hr style="margin: 5px 0;">
+                    <strong>Lugares Sentados:</strong> ${assentos}
+                </div>
+            `);
+        }
+    }).addTo(mapa);
+
+    // Controle de camadas
+    const camadasSobrepostas = {
+        "Paradas de Ônibus": paradasLayer
+    };
+
+    L.control.layers(null, camadasSobrepostas, { collapsed: false }).addTo(mapa);
+
+    // Legenda atualizada
+    const legend = L.control({position: 'bottomleft'});
+    legend.onAdd = function (map) {
+        const div = L.DomUtil.create('div', 'legend');
+        div.innerHTML = '<strong>Tipos de Parada</strong><br><br>';
+        for (const key in CONFIG_TIPOS) {
+            if (key !== 'padrao') {
+                div.innerHTML += '<i style="background: ' + CONFIG_TIPOS[key].cor + '"></i> ' + CONFIG_TIPOS[key].nome + '<br>';
+            }
+        }
+        return div;
+    };
+    legend.addTo(mapa);
+
+</script>
+</body>
+</html>
